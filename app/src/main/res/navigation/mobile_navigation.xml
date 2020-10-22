@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mobile_navigation"
+    app:startDestination="@+id/nav_home">
+
+    <fragment
+        android:id="@+id/nav_home"
+        android:name="com.kirwa.recipes.ui.chicken.HomeFragment"
+        android:label="@string/menu_home"
+        tools:layout="@layout/fragment_home" >
+        <action
+            android:id="@+id/action_nav_home_to_nav_breakfast"
+            app:destination="@id/nav_breakfast" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/nav_breakfast"
+        android:name="com.kirwa.recipes.ui.breakfast.BreakfastFragment"
+        android:label="@string/menu_gallery"
+        tools:layout="@layout/fragment_breakfast" >
+        <action
+            android:id="@+id/action_nav_breakfast_to_nav_brunch"
+            app:destination="@id/nav_brunch" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/nav_brunch"
+        android:name="com.kirwa.recipes.ui.brunch.BrunchFragment"
+        android:label="@string/menu_slideshow"
+        tools:layout="@layout/fragment_brunch" >
+        <action
+            android:id="@+id/action_nav_brunch_to_nav_dinner"
+            app:destination="@id/nav_dinner" />
+    </fragment>
+    <fragment
+        android:id="@+id/nav_dinner"
+        android:name="com.kirwa.recipes.ui.dinner.DinnerFragment"
+        android:label="Dinner"
+        tools:layout="@layout/fragment_dinner"/>
+</navigation>
