@@ -1,31 +1,42 @@
 package com.kirwa.recipes.ui.detail
 
-import androidx.appcompat.app.AppCompatActivity
-import android.os.Bundle
+import android.app.AlertDialog
+import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.Intent
+import android.content.IntentSender.SendIntentException
+import android.content.ServiceConnection
+import android.os.*
 import android.util.Log
 import android.widget.Button
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.PointerIconCompat
 import androidx.databinding.DataBindingUtil
 import androidx.lifecycle.MutableLiveData
-import com.android.billingclient.api.*
+import com.android.billingclient.api.BillingClient
+import com.android.billingclient.util.BillingHelper
+import com.android.vending.billing.IInAppBillingService
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import com.kirwa.recipes.GeneralResponse
+import com.kirwa.recipes.NetworkUtil
 import com.kirwa.recipes.R
 import com.kirwa.recipes.databinding.ActivityDetailBinding
-import com.kirwa.recipes.logger
 import com.kirwa.recipes.network.RecipeApiClient
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.schedulers.Schedulers
 import kotlinx.android.synthetic.main.activity_detail.*
+import org.json.JSONException
+import org.json.JSONObject
+import java.util.*
 import kotlin.math.roundToInt
 
-class DetailActivity : AppCompatActivity(), PurchasesUpdatedListener {
+class DetailActivity : AppCompatActivity(){
 
     lateinit var binding: ActivityDetailBinding
     lateinit var buttonSubscribe: Button
 
-    private lateinit var billingClient: BillingClient
     private val skuList = listOf("test_product_one", "test_product_two")
 
     private val apiClient by lazy {
@@ -34,17 +45,99 @@ class DetailActivity : AppCompatActivity(), PurchasesUpdatedListener {
     private var disposable = CompositeDisposable()
     private val status = MutableLiveData<GeneralResponse>()
 
+    private var mService: IInAppBillingService? = null
+    private val mServiceConn: ServiceConnection = object : ServiceConnection {
+        override fun onServiceDisconnected(name: ComponentName) {
+            mService = null
+        }
+
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            mService = IInAppBillingService.Stub.asInterface(service)
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = DataBindingUtil.setContentView(this, R.layout.activity_detail)
 
         buttonSubscribe = binding.btnSubscribe
+        val context = applicationContext
 
         val intent = intent.getStringExtra("rId")
         intent?.let { getRecipeDetail(it) }
 
-        setupBillingClient()
+        buttonSubscribe.setOnClickListener {
+            if (NetworkUtil.hasNetwork(this@DetailActivity)) {
+                var bundle: Bundle? = null
+                try {
+                    bundle = this@DetailActivity.mService!!.getBuyIntent(
+                        3,
+                        this@DetailActivity.getPackageName(),
+                        "test_product_3",
+                        BillingClient.SkuType.SUBS,
+                        "bGoa+V7g/yqDXvKRqq+JTFn4uQZbPiQJo4pf9RzJ"
+                    )
+                } catch (e: RemoteException) {
+                    e.printStackTrace()
+                }
+                try {
+                    this@DetailActivity.startIntentSenderForResult(
+                        (bundle!!.getParcelable<Parcelable>(
+                            BillingHelper.RESPONSE_BUY_INTENT_KEY
+                        ) as PendingIntent?)!!.intentSender,
+                        PointerIconCompat.TYPE_CONTEXT_MENU,
+                        Intent(),
+                        Integer.valueOf(0).toInt(),
+                        Integer.valueOf(0).toInt(),
+                        Integer.valueOf(0).toInt()
+                    )
+                } catch (e2: SendIntentException) {
+                    e2.printStackTrace()
+                }
+            } else {
+                val builder = AlertDialog.Builder(this@DetailActivity)
+                builder.setTitle("No internet connection" as CharSequence)
+                builder.setMessage("Please make sure you have a working internet connection" as CharSequence)
+                builder.show()
+            }
+        }
 
+        val intent1 = Intent("com.android.vending.billing.InAppBillingService.BIND")
+        intent1.setPackage("com.android.vending")
+        bindService(intent1, mServiceConn, BIND_AUTO_CREATE)
+        val sku = ArrayList<String>()
+        sku.add("test_product_3")
+        val bundle2 = Bundle()
+        bundle2.putStringArrayList("ITEM_ID_LIST", sku)
+        Handler().postDelayed({
+            try {
+                val skuDetails: Bundle = this@DetailActivity.mService!!.getSkuDetails(
+                    3,
+                    this@DetailActivity.getPackageName(),
+                    BillingClient.SkuType.SUBS,
+                    bundle2
+                )
+                if (skuDetails.getInt(BillingHelper.RESPONSE_CODE) == 0) {
+                    val it: Iterator<*> =
+                        skuDetails.getStringArrayList(BillingHelper.RESPONSE_GET_SKU_DETAILS_LIST)!!
+                            .iterator()
+                    while (it.hasNext()) {
+                        var jSONObject: JSONObject? = null
+                        try {
+                            jSONObject = JSONObject(it.next() as String?)
+                        } catch (e: JSONException) {
+                            e.printStackTrace()
+                        }
+                        try {
+                            jSONObject!!.getString("productId")
+                        } catch (e2: JSONException) {
+                            e2.printStackTrace()
+                        }
+                    }
+                }
+            } catch (e3: Exception) {
+                Log.e("trist", e3.toString())
+            }
+        }, 3000)
     }
 
     private fun getRecipeDetail(rId: String) {
@@ -84,90 +177,4 @@ class DetailActivity : AppCompatActivity(), PurchasesUpdatedListener {
         e.printStackTrace()
     }
 
-    private fun setupBillingClient() {
-        billingClient = BillingClient.newBuilder(this)
-            .enablePendingPurchases()
-            .setListener(this)
-            .build()
-        billingClient.startConnection(object : BillingClientStateListener {
-            override fun onBillingSetupFinished(billingResult: BillingResult) {
-                if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                    // The BillingClient is ready. You can query purchases here.
-                    logger("Setup Billing Done")
-                    loadAllSKUs()
-                }
-            }
-
-            override fun onBillingServiceDisconnected() {
-                // Try to restart the connection on the next request to
-                // Google Play by calling the startConnection() method.
-                logger("Failed")
-
-            }
-        })
-
-    }
-
-    private fun loadAllSKUs(){
-        if (billingClient.isReady) {
-            val params = SkuDetailsParams
-                .newBuilder()
-                .setSkusList(skuList)
-                .setType(BillingClient.SkuType.INAPP)
-                .build()
-            billingClient.querySkuDetailsAsync(params) { billingResult, skuDetailsList ->
-                // Process the result.
-                if (billingResult.responseCode == BillingClient.BillingResponseCode.OK && skuDetailsList!!.isNotEmpty()) {
-                    for (skuDetails in skuDetailsList!!) {
-                        if (skuDetails.sku == "test_product_one")
-                            btnSubscribe.isEnabled = true
-                            btnSubscribe.setOnClickListener {
-                                val billingFlowParams = BillingFlowParams
-                                    .newBuilder()
-                                    .setSkuDetails(skuDetails)
-                                    .build()
-                                billingClient.launchBillingFlow(this, billingFlowParams)
-                            }
-                    }
-                }
-                logger("Billing Client ready")
-                Log.d("Ready", "Billing Client ready")
-
-            }
-
-        } else {
-            logger("Billing Client not ready")
-        }
-    }
-
-    override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
-        if (billingResult.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
-            for (purchase in purchases) {
-                acknowledgePurchase(purchase.purchaseToken)
-            }
-        } else if (billingResult.responseCode == BillingClient.BillingResponseCode.USER_CANCELED) {
-            // Handle an error caused by a user cancelling the purchase flow.
-            logger("User Cancelled")
-            logger(billingResult.debugMessage.toString())
-            Log.d("Cancelled", "Billing Client not Cancelled")
-
-        } else {
-            logger(billingResult.debugMessage.toString())
-            // Handle any other error codes.
-        }
-    }
-
-
-    private fun acknowledgePurchase(purchaseToken: String) {
-        val params = AcknowledgePurchaseParams.newBuilder()
-            .setPurchaseToken(purchaseToken)
-            .build()
-        billingClient.acknowledgePurchase(params) { billingResult ->
-            val responseCode = billingResult.responseCode
-            val debugMessage = billingResult.debugMessage
-            logger(debugMessage)
-            logger(responseCode)
-            Log.d("success", "Billing Client purchase")
-        }
-    }
 }
